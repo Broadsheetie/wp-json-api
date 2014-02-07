@@ -1,0 +1,964 @@
+#JSON API
+A JSON API for WordPress
+
+##Description
+JSON API allows you to retrieve and manipulate WordPress content using HTTP requests. There are three main goals:
+
+1. Provide a simple, consistent external interface
+2. Create a stable, understandable internal implementation
+3. Enable new types of extensions for WordPress
+
+This plugin was created at [The Museum of Modern Art](http://moma.org/) for the weblog [Inside/Out](http://moma.org/explore/inside_out), which is served from Ruby on Rails. Instead of reimplementing the site templates as a WordPress theme, we opted for a Rails front-end that displays content served from a WordPress back-end. JSON API provides the necessary interface for retrieving content and accepting comment submissions.
+
+##Installation
+1. Upload the `json-api` folder to the `/wp-content/plugins/` directory or install directly through the plugin installer.
+2. Activate the plugin through the 'Plugins' menu in WordPress or by using the link provided by the plugin installer.
+
+##Table of Contents
+ - [General concepts](#general-concepts)
+   - [Requests](#requests)
+   - [Controllers](#controllers)
+   - [Responses](#responses)
+ - [Request methods](#request-methods)
+   - [Core controller methods](#core-controller-methods)
+   - [Posts controller methods](#pages-controller-methods)
+   - [Respond controller methods](#respond-controller-methods)
+   - [Widgets controller methods](#widgets-controller-methods)
+ - [Request arguments](#request-arguments)
+   - [Output-modifying arguments](#output-modifying-arguments)
+   - [Content-modifying arguments](#content-modifying-arguments)
+   - [Using include/exclude and redirects](#using-include/exclude-and-redirects)
+ - [Response objects](#response-objects)
+   - [Post response object](#post-response-object)
+   - [Category response object](#category-response-object)
+   - [Tag response object](#tag-response-object)
+   - [Author response object](#author-response-object)
+   - [Comment response object](#comment-response-object)
+   - [Attachment response object](#attachment-response-object)
+ - [Extending JSON API](#extending-json-api)
+   - [Plugin hooks](#plugin-hooks)
+   - [Developing JSON API controllers](#developing-json-api-controllers)
+   - [Configuration options](#configuration-options)
+ - [Unit tests](#unit-tests)
+   - [Preparing a WordPress test site](#preparing-a-wordpress-test-site)
+   - [Running the tests](#running-the-tests)
+
+##General Concepts
+###Requests
+Requests use a simple HTTP GET or POST. To invoke the API, include a non-empty query value for `json` in the URL.
+
+JSON API operates in two modes:
+
+1. *Implicit mode* is triggered by setting the `json` query var to a non-empty value on any WordPress page. The content that would normally appear on that page is returned in JSON format.
+2. *Explicit mode* is triggered by setting `json` to a known method string. See [Request methods](#request-methods) for a complete method listing.
+
+#####Implicit mode examples:
+
+ - `http://www.example.org/?json=1`
+ - `http://www.example.org/?p=47&json=1`
+ - `http://www.example.org/tag/banana/?json=1`
+
+#####Explicit mode examples:
+
+ - `http://www.example.org/?json=get_recent_posts`
+ - `http://www.example.org/?json=get_post&post_id=47`
+ - `http://www.example.org/?json=get_tag_posts&tag_slug=banana`
+
+#####With user-friendly permalinks configured:
+
+ - `http://www.example.org/api/get_recent_posts/`
+ - `http://www.example.org/api/get_post/?post_id=47`
+ - `http://www.example.org/api/get_tag_posts/?tag_slug=banana`
+
+__Further reading__
+See [Request arguments](#request-arguments) for more information about request arguments to modify the response.
+
+###Controllers
+The 1.0 release of JSON API introduced a modular controller system. This allows developers to flexibly add features to the API and give users more control over which methods they have enabled.
+
+#####The Core controller
+Most of the methods available prior to version 1.0 have been moved to the Core controller. The two exceptions are `submit_comment` and `create_post` which are now available from the Respond and Posts controllers, respectively. The Core controller is the only one enabled by default. All other functionality must be enabled from the JSON API Settings page (under Settings in the WordPress admin menu).
+
+#####Specifying a controller
+There are a few ways of specifying a controller, depending on how you are calling the API:
+
+ - `http://www.example.org/?json=get_recent_posts` (`core` controller is implied, method is `get_recent_posts`)
+ - `http://www.example.org/api/info/` (`core` controller is implied)
+ - `http://www.example.org/api/core/get_category_posts/` (`core` controller can also be explicitly specified)
+ - `http://www.example.org/?json=respond.submit_comment` (`respond` controller, `submit_comment` method)
+
+__Legacy compatibility__
+JSON API retains support for its pre-1.0 methods. For example, if you invoke the method `create_post` without a controller specified, the Posts controller is chosen instead of Core.
+
+#####Available controllers
+The current release includes three controllers:
+ - Core
+ - Posts
+ - Respond
+
+Developers are encouraged to suggest or submit additional controllers.
+
+__Further reading__
+See [Request methods](#request-methods) for a complete reference of available controllers and methods. For documentation on extending JSON API with new controllers see [Developing JSON API controllers](#developing-json-api-controllers).
+
+###Responses
+The standard response format for JSON API is (as you may have guessed) [JSON](http://json.org/).
+
+Here is an example response from `http://localhost/wordpress/?json=1` called on a default WordPress installation (formatted for readability):
+
+```json
+{
+  "status": "ok",
+  "count": 1,
+  "count_total": 1,
+  "pages": 1,
+  "posts": [
+    {
+      "id": 1,
+      "type": "post",
+      "slug": "hello-world",
+      "url": "http:\/\/localhost\/wordpress\/?p=1",
+      "title": "Hello world!",
+      "title_plain": "Hello world!",
+      "content": "<p>Welcome to WordPress. This is your first post. Edit or delete it, then start blogging!<\/p>\n",
+      "excerpt": "Welcome to WordPress. This is your first post. Edit or delete it, then start blogging!\n",
+      "date": "2009-11-11 12:50:19",
+      "modified": "2009-11-11 12:50:19",
+      "categories": [],
+      "tags": [],
+      "author": {
+        "id": 1,
+        "slug": "admin",
+        "name": "admin",
+        "first_name": "",
+        "last_name": "",
+        "nickname": "",
+        "url": "",
+        "description": ""
+      },
+      "comments": [
+        {
+          "id": 1,
+          "name": "Mr WordPress",
+          "url": "http:\/\/wordpress.org\/",
+          "date": "2009-11-11 12:50:19",
+          "content": "<p>Hi, this is a comment.<br \/>To delete a comment, just log in and view the post&#039;s comments. There you will have the option to edit or delete them.<\/p>\n",
+          "parent": 0
+        }
+      ],
+      "comment_count": 1,
+      "comment_status": "open"
+    }
+  ]
+}
+```
+
+##Request methods
+Request methods are available from the following controllers:
+
+ - Core controller - basic introspection methods
+ - Posts controller - data manipulation methods for posts
+ - Respond controller - comment/trackback submission methods
+ - Widgets controller - retrieve sidebar widgets
+
+###Core controller methods
+The Core controller offers a mostly-complete set of introspection methods for retrieving content from WordPress.
+
+####Method: `info`
+Returns information about JSON API.
+
+#####Optional arguments
+ - `controller` - returns detailed information about a specific controller
+
+#####Response
+```json
+{
+  "status": "ok",
+  "json_api_version": "1.0",
+  "controllers": [
+    "core"
+  ]
+}
+```
+
+#####Response with “controller=core”
+```json
+{
+  "status": "ok",
+  "name": "Core",
+  "description": "Basic introspection methods",
+  "methods": [
+    ...
+  ]
+}
+```
+
+####Method: `get_recent_posts`
+Returns an array of recent posts. You can invoke this from the WordPress home page either by setting `json` to a non-empty value (i.e., `json=1`) or from any page by setting `json=get_recent_posts`.
+
+#####Optional arguments
+ - `count` - determines how many posts per page are returned (default value is 10)
+ - `page` - return a specific page number from the results
+ - `post_type` - used to retrieve custom post types
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 10,
+  "count_total": 79,
+  "pages": 7,
+  "posts": [
+    { ... },
+    { ... },
+    ...
+  ]
+}
+```
+
+####Method: `get_posts`
+Returns posts according to WordPress's [`WP_Query` parameters](http://codex.wordpress.org/Class_Reference/WP_Query#Parameters). The one default parameter is `ignore_sticky_posts=1` (this can be overridden).
+
+#####Optional arguments
+
+ - `count` - determines how many posts per page are returned (default value is 10)
+ - `page` - return a specific page number from the results
+ - `post_type` - used to retrieve custom post types
+
+__Further reading__
+See the [`WP_Query` documentation](http://codex.wordpress.org/Class_Reference/WP_Query#Parameters) for a full list of supported parameters. The `post_status` parameter is currently ignored.
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 1,
+  "posts": [
+    { ... }
+  ]
+}
+```
+
+####Method: `get_post`
+Returns a single post object.
+
+#####One of the following is required
+ - Invoking the JSON API implicitly (i.e., `?json=1`) on a post URL
+ - `id` or `post_id` - set to the post's ID
+ - `slug` or `post_slug` - set to the post's URL slug
+
+#####Optional arguments
+ - `post_type` - used to retrieve custom post types
+
+#####Response
+```json
+{
+  "status": "ok",
+  "post": { ... }
+}
+```
+
+####Method: `get_page`
+Returns a single page object.
+
+#####One of the following is required
+ - Invoking the JSON API implicitly (i.e., `?json=1`) on a page URL
+ - `id` or `page_id` - set to the page's ID
+ - `slug` or `page_slug` - set to the page's URL slug
+
+#####Optional arguments
+ - `children` - set to a non-empty value to include a recursive hierarchy of child pages
+ - `post_type` - used to retrieve custom post types
+
+#####Response
+```json
+{
+  "status": "ok",
+  "page": { ... }
+}
+```
+
+####Method: `get_date_posts`
+Returns an array of posts/pages in a specific date archive (by day, month, or year).
+
+#####One of the following is required
+ - Invoking the JSON API implicitly (i.e., `?json=1`) on a date archive page
+ - `date` - set to a date in the format `YYYY` or `YYYY-MM` or `YYYY-MM-DD` (non-numeric characters are stripped from the var, so `YYYYMMDD` or `YYYY/MM/DD` are also valid)
+
+#####Optional arguments
+
+ - `count` - determines how many posts per page are returned (default value is 10)
+ - `page` - return a specific page number from the results
+ - `post_type` - used to retrieve custom post types
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 10,
+  "count_total": 79,
+  "pages": 7,
+  "posts": [
+    { ... },
+    { ... },
+    ...
+  ]
+}
+```
+
+####Method: `get_category_posts`
+Returns an array of posts/pages in a specific category.
+
+#####One of the following is required
+
+ - Invoking the JSON API implicitly (i.e., `?json=1`) on a category archive page
+ - `id` or `category_id` - set to the category's ID
+ - `slug` or `category_slug` - set to the category's URL slug
+
+#####Optional arguments
+ - `count` - determines how many posts per page are returned (default value is 10)
+ - `page` - return a specific page number from the results
+ - `post_type` - used to retrieve custom post types
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 10,
+  "count_total": 79,
+  "pages": 7,
+  "category": { ... }
+  "posts": [
+    { ... },
+    { ... },
+    ...
+  ]
+}
+```
+
+####Method: `get_tag_posts`
+Returns an array of posts/pages with a specific tag.
+
+#####One of the following is required
+ - Invoking the JSON API implicitly (i.e., `?json=1`) on a tag archive page
+ - `id` or `tag_id` - set to the tag's ID
+ - `slug` or `tag_slug` - set to the tag's URL slug
+
+#####Optional arguments
+ - `count` - determines how many posts per page are returned (default value is 10)
+ - `page` - return a specific page number from the results
+ - `post_type` - used to retrieve custom post types
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 10,
+  "count_total": 79,
+  "pages": 7,
+  "tag": { ... }
+  "posts": [
+    { ... },
+    { ... },
+    ...
+  ]
+}
+```
+
+####Method: `get_author_posts`
+Returns an array of posts/pages written by a specific author.
+
+#####One of the following is required
+ - Invoking the JSON API implicitly (i.e., `?json=1`) on an author archive page
+ - `id` or `author_id` - set to the author's ID
+ - `slug` or `author_slug` - set to the author's URL slug
+
+#####Optional arguments
+ - `count` - determines how many posts per page are returned (default value is 10)
+ - `page` - return a specific page number from the results
+ - `post_type` - used to retrieve custom post types
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 10,
+  "count_total": 79,
+  "pages": 7,
+  "author": { ... }
+  "posts": [
+    { ... },
+    { ... },
+    ...
+  ]
+}
+```
+
+####Method: `get_search_results`
+Returns an array of posts/pages in response to a search query.
+
+#####One of the following is required
+
+ - Invoking the JSON API implicitly (i.e., `?json=1`) on a search results page
+ - `search` - set to the desired search query
+
+#####Optional arguments
+ - `count` - determines how many posts per page are returned (default value is 10)
+ - `page` - return a specific page number from the results
+ - `post_type` - used to retrieve custom post types
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 10,
+  "count_total": 79,
+  "pages": 7,
+  "posts": [
+    { ... },
+    { ... },
+    ...
+  ]
+}
+```
+
+####Method: `get_date_index`
+Returns both an array of date page permalinks and a tree structure representation of the archive.
+
+#####Response
+```json
+{
+  "status": "ok",
+  "permalinks": [
+    "...",
+    "...",
+    "..."
+  ],
+  "tree": {
+    "2009": {
+      "09": 17,
+      "10": 20,
+      "11": 7
+    }
+  }
+}
+```
+
+Note: the tree is arranged by `response.tree.[year].[month].[number of posts]`.
+
+####Method: `get_category_index`
+Returns an array of active categories.
+
+#####Optional argument
+ - `parent` - returns categories that are direct children of the parent ID
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 3,
+  "categories": [
+    { ... },
+    { ... },
+    { ... }
+  ]
+}
+```
+
+####Method: `get_tag_index`
+Returns an array of active tags.
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 3,
+  "tags": [
+    { ... },
+    { ... },
+    { ... }
+  ]
+}
+```
+
+####Method: `get_author_index`
+Returns an array of active blog authors.
+
+#####Response
+```json
+{
+  "status": "ok",
+  "count": 3,
+  "authors": [
+    { ... },
+    { ... },
+    { ... }
+  ]
+}
+```
+
+####Method: `get_page_index`
+Returns a hierarchical tree of `page` posts.
+
+#####Response
+```json
+{
+  "status": "ok",
+  "pages": [
+    { ... },
+    { ... },
+    { ... }
+  ]
+}
+```
+
+####Method: `get_nonce`
+Returns a WordPress nonce value, required to call some data manipulation methods.
+
+#####Required arguments
+ - `controller` - the JSON API controller for the method you will use the nonce for
+ - `method` - the method you wish to call (currently `create_post` is the only method that requires a nonce)
+
+#####Response
+```json
+{
+  "status": "ok",
+  "controller": "posts",
+  "method": "create_post",
+  "nonce": "cefe01efd4"
+}
+```
+
+__Further reading__
+To learn more about how nonces are used in WordPress, see [Mark Jaquith's article on the subject](http://markjaquith.wordpress.com/2006/06/02/wordpress-203-nonces/).
+
+###Pages controller methods
+####Method: `create_post`
+Creates a new post.
+
+#####Required argument
+ - `nonce` - available from the `get_nonce` method (call with vars `controller=posts` and `method=create_post`)
+
+#####Optional arguments
+ - `status` - sets the post status ("draft" or "publish"), default is "draft"
+ - `title` - the post title
+ - `content` - the post content
+ - `author` - the post's author (login name), default is the current logged in user
+ - `categories` - a comma-separated list of categories (URL slugs)
+ - `tags` - a comma-separated list of tags (URL slugs)
+
+Note: including a file upload field called `attachment` will cause an attachment to be stored with your new post.
+
+####Method: `update_post`
+Updates a post.
+
+#####Required argument
+ - `nonce` - available from the `get_nonce` method (call with vars `controller=posts` and `method=update_post`)
+
+#####One of the following is required
+ - `id` or `post_id` - set to the post's ID
+ - `slug` or `post_slug` - set to the post's URL slug
+
+#####Optional arguments
+ - `status` - sets the post status ("draft" or "publish"), default is "draft"
+ - `title` - the post title
+ - `content` - the post content
+ - `author` - the post's author (login name), default is the current logged in user
+ - `categories` - a comma-separated list of categories (URL slugs)
+ - `tags` - a comma-separated list of tags (URL slugs)
+
+Note: including a file upload field called `attachment` will cause an attachment to be stored with your post.
+
+####Method: `delete_post`
+Deletes a post.
+
+#####Required argument
+ - `nonce` - available from the `get_nonce` method (call with vars `controller=posts` and `method=delete_post`)
+
+#####One of the following is required
+ - `id` or `post_id` - set to the post's ID
+ - `slug` or `post_slug` - set to the post's URL slug
+
+###Respond controller methods
+####Method: `submit_comment`
+Submits a comment to a WordPress post.
+
+#####Required arguments
+ - `post_id` - which post to comment on
+ - `name` - the commenter's name
+ - `email` - the commenter's email address
+ - `content` - the comment content
+
+#####Optional arguments
+ - `redirect` - redirect instead of returning a JSON object
+ - `redirect_ok` - redirect to a specific URL when the status value is `ok`
+ - `redirect_error` - redirect to a specific URL when the status value is `error`
+ - `redirect_pending` - redirect to a specific URL when the status value is `pending`
+
+#####Custom status values
+ - `pending` - assigned if the comment submission is pending moderation
+
+###Widgets controller methods
+####Method: `get_sidebar`
+Retrieves widgets assigned to a sidebar.
+
+#####Required arguments
+ - `sidebar_id` - the name or number of the sidebar to retrieve
+
+##Request arguments
+API requests can be controlled by specifying one of the following arguments as URL query vars.
+
+#####Examples
+ - Debug the response: `http://www.example.org/api/get_page_index/?dev=1`
+ - Widget-style JSONP output: `http://www.example.org/api/get_recent_posts/?callback=show_posts_widget&read_more=More&count=3`
+ - Redirect on error: `http://www.example.org/api/posts/create_post/?callback_error=http%3A%2F%2Fwww.example.org%2Fhelp.html`
+
+###Output-modifying arguments
+The following arguments modify how you get results back from the API. The redirect response styles are intended for use with the data manipulation methods.
+
+ - Setting `callback` to a JavaScript function name will trigger a JSONP-style callback.
+ - Setting `redirect` to a URL will cause the user's browser to redirect to the specified URL with a `status` value appended to the query vars (see [Response objects](#response-objects) for an explanation of status values).
+ - Setting `redirect_[status]` allows you to control the resulting browser redirection depending on the `status` value.
+ - Setting `dev` to a non-empty value adds whitespace for readability and responds with `text/plain`
+ - Errors are suppressed unless `dev` is set to a non-empty value
+ - Setting `json_encode_options` will let you specify an integer bitmask to modify the behavior of [PHP's `json_encode`](http://php.net/manual/en/function.json-encode.php) (Note: this option is only recognized in PHP version 5.3+)
+ - Setting `json_unescaped_unicode` will replace unicode-escaped characters with their unescaped equivalents (e.g., `\u00e1` becomes á)
+ - Omitting all of the above arguments will result in a standard JSON response.
+
+###Content-modifying arguments
+These arguments are available to modify all introspection methods:
+
+ - `date_format` - Changes the format of date values. Uses the same syntax as PHP's date() function. Default value is `Y-m-d H:i:s`.
+ - `read_more` - Changes the 'read more' link text in post content.
+ - `include` - Specifies which post data fields to include. Expects a comma-separated list of post fields. Leaving this empty includes *all* fields.
+ - `exclude` - Specifies which post data fields to exclude. Expects a comma-separated list of post fields.
+ - `custom_fields` - Includes values from posts' Custom Fields. Expects a comma-separated list of custom field keys.
+ - `author_meta` - Includes additional author metadata. Should be a comma-separated list of metadata fields.
+ - `count` - Controls the number of posts to include (defaults to the number specified by WordPress)
+ - `order` - Controls the order of post results ('DESC' or 'ASC'). Default value is 'DESC'.
+ - `order_by` - Controls which field to order results by. Expects one of the following values:
+   - `author`
+   - `date` (default value)
+   - `title`
+   - `modified`
+   - `menu_order` (only works with Pages)
+   - `parent`
+   - `ID`
+   - `rand`
+   - `meta_value` (`meta_key` must also be set)
+   - `none`
+   - `comment_count`
+    - `meta_key`, `meta_value`, `meta_compare` - Retrieve posts (or Pages) based on a custom field key or value.
+
+###Using include/exclude and redirects
+__About `include`/`exclude` arguments__
+By default you get all values included with each post object. Specify a list of `include` values will cause the post object to filter out the values absent from the list. Specifying `exclude` causes post objects to include all values except the fields you list. For example, the query `exclude=comments` includes everything *except* the comments.
+
+__About the `redirect` argument__
+The `redirect` response style is useful for when you need the user's browser to make a request directly rather than making proxy requests using a tool like cURL. Setting a `redirect` argument causes the user's browser to redirect back to the specified URL instead of returning a JSON object. The resulting `status` value is included as an extra query variable.
+
+For example calling an API method with `redirect` set to `http://www.example.com/foo` will result in a redirection to one of the following:
+
+ - `http://www.example.com/foo?status=ok`
+ - `http://www.example.com/foo?status=error`
+
+You can also set separate URLs to handle status values differently. You could set `redirect_ok` to `http://www.example.com/handle_ok` and `redirect_error` to `http://www.example.com/handle_error` in order to have more fine-tuned control over the method result.
+
+##Response objects
+This section describes data objects you can retrieve from WordPress and the optional URL redirects.
+
+__Status values__
+All JSON API requests result in a status value. The two basic status values are `ok` and `error`. Additional status values are available for certain methods (such as `pending` in the case of the `submit_comment` method). API methods that result in custom status values include a *custom status values* section in their documentation.
+
+__Naming compatibility__
+Developers familiar with WordPress may notice that many names for properties and arguments have been changed. This was a stylistic choice that intends to provide more clarity and consistency in the interface.
+
+###Post response object
+ - `id` - Integer
+ - `type` - String (e.g., `post` or `page`)
+ - `slug` - String
+ - `url` - String
+ - `title` - String
+ - `title_plain` - String
+ - `content` - String (modified by the `read_more` argument)
+ - `excerpt` - String
+ - `date` - String (modified by the `date_format` argument)
+ - `modified` - String (modified by the `date_format` argument)
+ - `categories` - Array of category objects
+ - `tags` - Array of tag objects
+ - `author` Author object
+ - `comments` - Array of comment objects
+ - `attachments` - Array of attachment objects
+ - `comment_count` - Integer
+ - `comment_status` - String (`"open"` or `"closed"`)
+ - `thumbnail` - String (only included if a post thumbnail has been specified)
+ - `custom_fields` - Object (included by setting the `custom_fields` argument to a comma-separated list of custom field names)
+ - `taxonomy_(taxonomy)` - Array of custom taxonomy objects (these resemble Category or Tag response objects, depending on whether the taxonomy is hierarchical)
+
+__Note__
+The `thumbnail` attribute returns a URL to the image size specified by the optional `thumbnail_size` request argument. By default this will use the `thumbnail` or `post-thumbnail` sizes, depending on your version of WordPress. See [Mark Jaquith's post on the topic](http://markjaquith.wordpress.com/2009/12/23/new-in-wordpress-2-9-post-thumbnail-images/) for more information.
+
+###Category response object
+ - `id` - Integer
+ - `slug` - String
+ - `title` - String
+ - `description` - String
+ - `parent` - Integer
+ - `post_count` - Integer
+
+###Tag response object
+ - `id` - Integer
+ - `slug` - String
+ - `title` - String
+ - `description` - String
+ - `post_count` - Integer
+
+###Author response object
+ - `id` - Integer
+ - `slug` - String
+ - `name` - String
+ - `first_name` - String
+ - `last_name` - String
+ - `nickname` - String
+ - `url` - String
+ - `description` - String
+
+Note: You can include additional values by setting the `author_meta` argument to a comma-separated list of metadata fields.
+
+###Comment response object
+ - `id` - Integer
+ - `name` - String
+ - `url` - String
+ - `date` - String
+ - `content` - String
+ - `parent` - Integer
+ - `author` - Object (only set if the comment author was registered & logged in)
+
+###Attachment response object
+ - `id` - Integer
+ - `url` - String
+ - `slug` - String
+ - `title` - String
+ - `description` - String
+ - `caption` - String
+ - `parent` - Integer
+ - `mime_type` - String
+ - `images` - Object with values including `thumbnail`, `medium`, `large`, `full`, each of which are objects with values `url`, `width` and `height` (only set if the attachment is an image)
+
+##Extending JSON API
+JSON API exposes several WordPress action and filter hooks as well as a modular controller system for adding new API methods.
+
+###Plugin hooks
+JSON API exposes several [action and filter hooks](http://codex.wordpress.org/Plugin_API#Hooks.2C_Actions_and_Filters) to augment its behavior.
+
+####Filter: `json_api_controllers`
+This filter controls the array of controllers available to JSON API. The callback function is passed a single argument, an array of strings.
+
+#####Example
+```php
+<?php
+  function add_my_controller($controllers) {
+    // Corresponds to the class JSON_API_MyController_Controller
+    $controllers[] = 'MyController';
+    return $controllers;
+  }
+
+  // Add a custom controller
+  add_filter('json_api_controllers', 'add_my_controller');
+?>
+```
+
+####Filter: `json_api_[controller]_controller_path`
+Specifies the PHP source file for a given controller, overriding the default location `wp-content/plugins/json_api/controllers`.
+
+__Note__
+If you your controller file in the `json-api/controllers` folder JSON API will find it automatically.
+
+#####Example
+```php
+<?php
+  function widgets_controller_path($default_path) {
+    return '/path/to/widgets.php';
+  }
+
+  // Register the source file for JSON_API_Widgets_Controller
+  add_filter('json_api_widgets_controller_path', 'widgets_controller_path');
+?>
+```
+
+__Capitalization__
+Your filter hook must be all-lowercase to work correctly. The above example would fail with the filter `json_api_Widgets_Controller_path`, even if that's how the class is capitalized in the PHP source.
+
+####Filter: `json_api_encode`
+This is called just before the output is encoded into JSON format. The value passed will always be an associative array, according to the format described in each method's documentation. Those items described in [Response objects](#response-objects) are passed as PHP objects, not associative arrays.
+
+#####Example
+```php
+<?php
+  function my_encode_kittens($response) {
+    if (isset($response['posts'])) {
+      foreach ($response['posts'] as $post) {
+        my_add_kittens($post); // Add kittens to each post
+      }
+    } else if (isset($response['post'])) {
+      my_add_kittens($response['post']); // Add a kittens property
+    }
+    return $response;
+  }
+  function my_add_kittens(&$post) {
+    $post->kittens = 'Kittens!';
+  }
+  add_filter('json_api_encode', 'my_encode_kittens');
+?>
+```
+
+####Action: `json_api-[controller]-[method]`
+Each JSON API method invokes an action when called.
+
+#####Example
+```php
+<?php
+  // Disable get_author_index method (e.g., for security reasons)
+  function my_disable_author_index() {
+    // Stop execution
+    exit;
+  }
+  add_action('json_api-core-get_author_index', 'my_disable_author_index');
+?>
+```
+
+###Developing JSON API controllers
+#####Creating a controller
+To start a new JSON API controller, create a file called `hello.php` inside `wp-content/plugins/json-api/controllers`. Add the following class definition:
+
+```php
+<?php
+  class JSON_API_Hello_Controller {
+    public function hello_world() {
+      return array(
+        "message" => "Hello, world"
+      );
+    }
+  }
+?>
+```
+
+Your controller is now available as `hello`, and exposes one `hello_world` method.
+
+Next, activate your controller from the WordPress admin interface, available from the menu under Settings > JSON API. You can either click on the link to your `hello_world` method from the admin interface or enter it manually. It should have the form: `http://www.example.org/api/hello/hello_world/?dev=1` or `http://www.example.org/?json=hello.hello_world&dev=1` (note the use of the `dev` argument to enable human-readable output). You should get the following output:
+
+```json
+{
+  "status": "ok",
+  "message": "Hello, world"
+}
+```
+
+#####Using query vars
+To customize the behavior of your controller, you will want to make use of the global `$json_api->query` object. Add the following method to your controller:
+
+```php
+<?php
+  public function hello_person() {
+    global $json_api;
+    $name = $json_api->query->name;
+    return array(
+      "message" => "Hello, $name."
+    );
+  }
+?>
+```
+
+Now append the `name` query var to the method call: `http://www.example.org/api/hello/hello_world/?dev=1&name=Alice` or `http://www.example.org/?json=hello.hello_world&dev=1&name=Alice`.
+
+```json
+{
+  "status": "ok",
+  "message": "Hello, Alice"
+}
+```
+
+#####Introspector and data models
+Your controller can use any of the [existing WordPress functions](http://codex.wordpress.org/Function_Reference) to collect data, but JSON API also includes an introspector that wraps data in objects defined in the `json-api/models` directory. These are the same data models described in [Response objects](#response-objects).
+
+Here is an example of how you might use the introspector:
+
+```php
+<?php
+  // Retrieve posts based on custom field key/value pair
+  public function get_custom_posts() {
+    global $json_api;
+
+    // Make sure we have key/value query vars
+    if (!$json_api->query->key || !$json_api->query->value) {
+      $json_api->error("Include a 'key' and 'value' query var.");
+    }
+
+    // See also: http://codex.wordpress.org/Template_Tags/query_posts
+    $posts = $json_api->introspector->get_posts(array(
+      'meta_key' => $json_api->query->key,
+      'meta_value' => $json_api->query->value
+    ));
+
+    return array(
+      'key' => $key,
+      'value' => $value,
+      'posts' => $posts
+    );
+  }
+?>
+```
+
+#####External controllers
+It is recommended that custom controllers are kept outside of `json-api/controllers` in order to avoid accidental deletion during upgrades or site migrations. To make your controller visible from an external plugin or theme directory you will need to use two filters: `json_api_controllers` and `json_api_[controller]_controller_path`. Move the `hello.php` file from the steps above into your theme's directory. Then add the following to your theme's `functions.php` file (if your theme doesn't have a file called `functions.php` you can create one).
+
+```php
+<?php
+  function add_hello_controller($controllers) {
+    $controllers[] = 'hello';
+    return $controllers;
+  }
+  add_filter('json_api_controllers', 'add_hello_controller');
+
+  function set_hello_controller_path() {
+    return "/path/to/theme/hello.php";
+  }
+  add_filter('json_api_hello_controller_path', 'set_hello_controller_path');
+?>
+```
+
+###Configuration options
+The following are constants you can define in your `wp-config.php` folder:
+
+ - `JSON_API_DIR` - set to the directory where JSON API plugin lives (in some cases this can be useful for `mu-plugins` with WordPress MU)
+ - `JSON_API_CONTROLLERS` - a comma-separated list of default controllers to enable (this is overridden by the JSON API settings page)
+
+##Unit tests
+JSON API comes with a set of tests that should make it easier to maintain and reveal incompatibilities when they might occur. This is an ongoing process, I hope to improve the test coverage going forward.
+
+###Preparing a WordPress test site
+There are a few necessary steps that need to be carried out before the test suite will run properly.
+
+1. WordPress should generate a new set of tables before you start, so if you're testing with a `wp_` table prefix make sure the database has no existing tables of this kind
+2. Configure and install a new copy of WordPress
+3. Delete the Hello World post and Sample Page (titled "About" in some versions of WordPress)
+4. Enable user-friendly URLs from Settings > Permalinks, use the "Day and name" format
+5. Install + Activate the JSON API plugin and enable all bundled controllers from Settings > JSON API
+6. Import the [Theme Unit Test](http://codex.wordpress.org/Theme_Unit_Test) test data XML file from Settings > Import > WordPress (you will need to install the WordPress Importer plugin)
+
+###Running the tests
+From the command line, make sure you have the HTTP_Client PEAR package installed:
+
+`pear install HTTP_Client`
+
+Change directory to `tests` and run the following:
+
+`pear run-tests`
+
+You should see the test results print out culminating in a summary:
+
+```
+TOTAL TIME: 00:04
+23 PASSED TESTS
+0 SKIPPED TESTS
+```
